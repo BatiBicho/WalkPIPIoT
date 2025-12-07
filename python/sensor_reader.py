@@ -1,4 +1,4 @@
-# sensor_reader.py OPTIMIZADO PARA TIEMPO REAL
+# sensor_reader.py - VERSIÓN CORREGIDA
 import serial
 import time
 import json
@@ -37,7 +37,8 @@ class CompleteSensorSystem:
         # Control de tiempo para envíos
         self.last_caminata_send = 0
         self.last_corazon_send = 0
-        self.send_interval = 5  # Enviar cada 5 segundos
+        # REDUCIDO: Enviar cada 3 segundos (más rápido para gráficas)
+        self.send_interval = 3
         self.session_start_time = None
         self.pasos_anteriores = 0
 
@@ -74,13 +75,12 @@ class CompleteSensorSystem:
             self.ser.reset_output_buffer()
 
             # Configuración para lectura no bloqueante
-            # Buffer pequeño para evitar acumulación
-            self.ser.set_buffer_size(rx_size=128)
+            self.ser.set_buffer_size(rx_size=128)  # Buffer pequeño
 
             time.sleep(1)  # Espera mínima para estabilización
             print(f"✅ Conectado a {self.port}")
             print(
-                f"⚡ Configuración optimizada: timeout={self.ser.timeout}s, baudrate={self.baudrate}")
+                f"⚡ Configuración: timeout={self.ser.timeout}s, baudrate={self.baudrate}")
             return True
         except serial.SerialException as e:
             print(f"❌ Error conectando: {e}")
@@ -171,26 +171,13 @@ class CompleteSensorSystem:
                     except json.JSONDecodeError:
                         continue  # Ignorar datos corruptos
 
-                    # PROCESAMIENTO EN TIEMPO REAL MEJORADO
+                    # PROCESAMIENTO EN TIEMPO REAL
                     current_time = time.time()
 
-                    # 1. Detección de dedo en tiempo real
-                    finger_detected = sensor_data.get('finger_detected', False)
-                    ir_value = sensor_data.get('ir_value', 0)
+                    # 1. NO forzar valores a 0 - dejar que ESP32 controle
+                    # Esto permite ver transiciones naturales en gráficas
 
-                    # Algoritmo mejorado para detección rápida
-                    is_finger_now = finger_detected and ir_value > 30000
-
-                    if is_finger_now:
-                        self.last_finger_time = current_time
-
-                    # Si no hay dedo por más de 1 segundo, forzar reset
-                    if current_time - self.last_finger_time > self.no_finger_timeout:
-                        sensor_data['finger_detected'] = False
-                        sensor_data['ritmo_cardiaco'] = 0
-                        sensor_data['spo2'] = 0
-
-                    # 2. Actualizar estadísticas inmediatamente
+                    # 2. Actualizar estadísticas
                     spo2 = sensor_data.get('spo2', 0)
                     if spo2 > 0:
                         self.max_spo2 = max(self.max_spo2, spo2)
@@ -202,77 +189,21 @@ class CompleteSensorSystem:
                     self.last_valid_data = sensor_data
                     self.data_count += 1
 
-                    # 4. Mostrar en dashboard EN TIEMPO REAL (sin delay)
+                    # 4. Mostrar dashboard
                     self.display_dashboard_realtime(sensor_data)
 
-                    # 5. Guardar en CSV (sin bloquear)
+                    # 5. Guardar en CSV
                     self.save_to_csv_fast(sensor_data)
 
-                    # 6. Enviar a API si es tiempo (en segundo plano)
+                    # 6. Enviar a API SIEMPRE (controlado por tiempo)
                     self.send_to_api_if_ready(sensor_data, current_time)
 
                 # Pequeña pausa si no hay datos
-                if not self.data_buffer:
-                    time.sleep(0.01)
+                time.sleep(0.01)
 
             except Exception as e:
                 print(f"⚠️ Error en procesamiento: {e}")
                 time.sleep(0.1)
-
-    # def display_dashboard_realtime(self, data):
-    #     """Dashboard optimizado para tiempo real"""
-    #     if not data:
-    #         return
-
-    #     spo2 = data.get('spo2', 0)
-    #     ritmo = data.get('ritmo_cardiaco', 0)
-    #     finger_detected = data.get('finger_detected', False)
-    #     pasos = data.get('pasos_totales', 0)
-    #     acel_total = data.get('acel_total', 0)
-
-    #     # Limpiar consola y mostrar datos inmediatos
-    #     print("\033[H\033[J")  # Comando para limpiar consola
-
-    #     print("="*60)
-    #     print("🎯 SISTEMA DE SENSORES - TIEMPO REAL")
-    #     print("="*60)
-
-    #     # Estado dedo con iconos inmediatos
-    #     finger_icon = "👆 DETECTADO" if finger_detected else "👈 NO DETECTADO"
-    #     # Verde/Rojo
-    #     finger_color = "\033[92m" if finger_detected else "\033[91m"
-    #     reset_color = "\033[0m"
-
-    #     # Datos SpO2 con colores
-    #     spo2_color = "\033[92m"  # Verde por defecto
-    #     if spo2 < 90:
-    #         spo2_color = "\033[93m"  # Amarillo
-    #     if spo2 < 85:
-    #         spo2_color = "\033[91m"  # Rojo
-
-    #     # Mostrar datos críticos primero
-    #     print(f"{finger_color}{finger_icon}{reset_color}")
-    #     print(
-    #         f"{spo2_color}📟 SpO2: {spo2:5.1f}%{reset_color} | ❤️  Ritmo: {ritmo:3d} bpm")
-    #     print(f"📊 Pasos: {pasos:4d} | 🚀 Acel: {acel_total:5.2f} m/s²")
-    #     print(f"📈 Datos procesados: {self.data_count}")
-    #     print("="*60)
-
-    #     # Barras de progreso para visualización
-    #     if finger_detected and spo2 > 0:
-    #         spo2_bars = int((spo2 - 70) / 3)
-    #         spo2_bars = max(0, min(10, spo2_bars))
-    #         print(f"[{'█' * spo2_bars}{'░' * (10-spo2_bars)}] SpO2")
-
-    #         if ritmo > 0:
-    #             hr_bars = int((ritmo - 40) / 12)
-    #             hr_bars = max(0, min(10, hr_bars))
-    #             print(f"[{'█' * hr_bars}{'░' * (10-hr_bars)}] Ritmo")
-
-    #     print("\nPresiona Ctrl+C para salir")
-    #     print("-"*60)
-
-# En tu sensor_reader.py, modifica display_dashboard_realtime:
 
     def display_dashboard_realtime(self, data):
         """Dashboard optimizado para tiempo real"""
@@ -309,7 +240,8 @@ class CompleteSensorSystem:
             print(f"   IR: {ir_value:,} | Rojo: {data.get('red_value', 0):,}")
         else:
             print(f"📟 MAX30105 - Dedo: 👈 NO DETECTADO")
-            print(f"   SpO2: --.--% | Ritmo: --- bpm")
+            print(f"   SpO2: {spo2:5.1f}% | Ritmo: {ritmo:3d} bpm")
+            print(f"   IR: {ir_value:,}")
 
         print("-"*60)
 
@@ -346,7 +278,7 @@ class CompleteSensorSystem:
                     1 if sensor_status.get('mpu6050', False) else 0
                 ])
 
-                # Flush cada 10 registros (no cada uno para mejor rendimiento)
+                # Flush cada 10 registros
                 if self.data_count % 10 == 0:
                     self.csv_file.flush()
 
@@ -374,32 +306,36 @@ class CompleteSensorSystem:
                 pasos = sensor_data.get('pasos_totales', 0)
                 pasos_nuevos = pasos - self.pasos_anteriores
 
-                if pasos_nuevos > 0:
-                    km_recorridos = round((pasos_nuevos * 0.08), 4)
-                    calorias = round(pasos_nuevos * 0.04, 2)
+                # Enviar SIEMPRE, incluso si pasos_nuevos es 0
+                # Esto mantiene la conexión activa
 
-                    data = {
-                        "km_recorridos": str(km_recorridos),
-                        "pasos": pasos_nuevos,
-                        "tiempo_actividad": str(int(time.time() - self.session_start_time)),
-                        "velocidad_promedio": "0",
-                        "calorias_quemadas": str(calorias),
-                        "sesion": 1
-                    }
+                km_recorridos = round((max(pasos_nuevos, 0) * 0.08), 4)
+                calorias = round((max(pasos_nuevos, 0) * 0.04), 2)
 
-                    response = requests.post(
-                        self.endpoint_caminata,
-                        json=data,
-                        headers={'Content-Type': 'application/json'},
-                        timeout=2  # Timeout corto
-                    )
+                data = {
+                    "km_recorridos": str(km_recorridos),
+                    "pasos": max(pasos_nuevos, 0),
+                    "tiempo_actividad": str(int(time.time() - self.session_start_time)),
+                    "velocidad_promedio": "0",
+                    "calorias_quemadas": str(calorias),
+                    "sesion": 1
+                }
 
-                    if response.status_code in [200, 201]:
+                response = requests.post(
+                    self.endpoint_caminata,
+                    json=data,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=2
+                )
+
+                if response.status_code in [200, 201]:
+                    if pasos_nuevos > 0:
                         print(f"✅ API Caminata: {pasos_nuevos} pasos enviados")
-                        self.pasos_anteriores = pasos
-                    else:
-                        print(f"⚠️ API Caminata error: {response.status_code}")
+                    # No mostrar mensaje si es 0 para no saturar consola
+                else:
+                    print(f"⚠️ API Caminata error: {response.status_code}")
 
+                self.pasos_anteriores = pasos
                 self.last_caminata_send = current_time
 
             except requests.exceptions.ConnectionError:
@@ -412,35 +348,42 @@ class CompleteSensorSystem:
         thread.start()
 
     def send_corazon_background(self, sensor_data, current_time):
-        """Enviar datos de corazón en segundo plano"""
+        """Enviar datos de corazón en segundo plano - CORREGIDO"""
         def send_thread():
             try:
                 spo2 = sensor_data.get('spo2', 0)
                 ritmo = sensor_data.get('ritmo_cardiaco', 0)
+                finger_detected = sensor_data.get('finger_detected', False)
 
-                # Solo enviar si hay datos válidos
-                if spo2 > 0 and ritmo > 0:
-                    now = datetime.now()
-                    data = {
-                        "ritmo_cardiaco": int(ritmo),
-                        "presion": "90",
-                        "oxigenacion": str(round(spo2, 2)),
-                        "fecha": now.strftime('%Y-%m-%d'),
-                        "hora": now.strftime('%H%M%S'),
-                        "sesion": 1
-                    }
+                # ENVIAR SIEMPRE, incluso si son 0
+                # Esto hará que las gráficas muestren la bajada a 0
 
-                    response = requests.post(
-                        self.endpoint_corazon,
-                        json=data,
-                        headers={'Content-Type': 'application/json'},
-                        timeout=2
-                    )
+                now = datetime.now()
+                data = {
+                    "ritmo_cardiaco": int(ritmo),
+                    "presion": "90",  # Valor fijo para demo
+                    "oxigenacion": str(round(spo2, 2)),
+                    "fecha": now.strftime('%Y-%m-%d'),
+                    "hora": now.strftime('%H%M%S'),
+                    "sesion": 1
+                }
 
-                    if response.status_code in [200, 201]:
+                response = requests.post(
+                    self.endpoint_corazon,
+                    json=data,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=2
+                )
+
+                if response.status_code in [200, 201]:
+                    if ritmo > 0 or spo2 > 0:
                         print(f"✅ API Corazón: {ritmo} bpm, {spo2:.1f}% SpO2")
                     else:
-                        print(f"⚠️ API Corazón error: {response.status_code}")
+                        # Solo mostrar cada 5 envíos cuando es 0 para no saturar
+                        if int(current_time) % 15 < 3:  # Cada ~15 segundos
+                            print(f"📉 API: Sin dedo (0 bpm, 0% SpO2)")
+                else:
+                    print(f"⚠️ API Corazón error: {response.status_code}")
 
                 self.last_corazon_send = current_time
 
@@ -449,6 +392,7 @@ class CompleteSensorSystem:
             except Exception as e:
                 print(f"⚠️ Error API Corazón: {e}")
 
+        # CORRECCIÓN: Esta línea debe estar DENTRO de la función, no fuera
         thread = threading.Thread(target=send_thread, daemon=True)
         thread.start()
 
@@ -466,20 +410,19 @@ class CompleteSensorSystem:
 
         try:
             print("\n" + "="*60)
-            print("🎯 SISTEMA OPTIMIZADO - TIEMPO REAL")
+            print("🎯 SISTEMA PARA GRÁFICAS EN TIEMPO REAL")
             print("="*60)
             print("📟 MAX30105: Pulso y Oxigenación")
             print("📊 MPU6050:  Pasos y Movimiento")
-            print("\n⚡ Características:")
-            print("   • Respuesta inmediata (< 100ms)")
-            print("   • Dashboard en tiempo real")
-            print("   • Detección rápida de dedo")
-            print("   • Envío API no bloqueante")
+            print("\n⚡ CONFIGURACIÓN:")
+            print("   • Envío API cada 3 segundos")
+            print("   • Dashboard actualizado en tiempo real")
+            print("   • Valores 0 también se envían")
             print("\n👆 INSTRUCCIONES:")
-            print("   - Pon/quita dedo rápidamente")
-            print("   - Mueve el sensor para contar pasos")
+            print("   - Pon/quita dedo para ver transiciones en gráficas")
+            print("   - Agita sensor para contar pasos")
             print("   - Ctrl+C para salir")
-            print("\n⏱️  Iniciando...")
+            print("\n⏱️  Iniciando monitoreo...")
             print("="*60)
 
             # Iniciar hilos
@@ -583,10 +526,10 @@ if __name__ == "__main__":
     print(f"\n🔌 Configuración:")
     print(f"   Puerto: {port}")
     print(f"   Baudrate: {baudrate}")
-    print(f"   Timeout lectura: 0.1s")
-    print(f"   Actualización: inmediata")
+    print(f"   Envío API: cada 3 segundos")
+    print(f"   Dashboard: tiempo real")
 
-    # Crear y ejecutar sistema optimizado
+    # Crear y ejecutar sistema
     system = CompleteSensorSystem(port=port, baudrate=baudrate)
 
     try:
